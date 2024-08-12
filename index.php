@@ -8,6 +8,7 @@ class DataProvider
     private $user;
     private $password;
 
+    //оформить PHPDoc согласно стандартам
     /**
      * @param $host
      * @param $user
@@ -20,12 +21,13 @@ class DataProvider
         $this->password = $password;
     }
 
+    //возможно, стоит вынести этот метод в отдельный класс
     /**
      * @param array $request
      *
      * @return array
      */
-    public function get(array $request)
+    public function get(array $request) // название функции не даёт понимания, что мы получаем
     {
         // returns a response from external service
     }
@@ -40,7 +42,7 @@ use Psr\Cache\CacheItemPoolInterface;
 use Psr\Log\LoggerInterface;
 use src\Integration\DataProvider;
 
-class DecoratorManager extends DataProvider
+class DecoratorManager extends DataProvider // наследование создаёт жесткую связь между классами, лучше использовать композицию
 {
     public $cache;
     public $logger;
@@ -57,7 +59,7 @@ class DecoratorManager extends DataProvider
         $this->cache = $cache;
     }
 
-    public function setLogger(LoggerInterface $logger)
+    public function setLogger(LoggerInterface $logger) //логгер нужно передавать в конструктор
     {
         $this->logger = $logger;
     }
@@ -68,6 +70,7 @@ class DecoratorManager extends DataProvider
     public function getResponse(array $input)
     {
         try {
+            // вот это лучше в отдельную функцию переместить
             $cacheKey = $this->getCacheKey($input);
             $cacheItem = $this->cache->getItem($cacheKey);
             if ($cacheItem->isHit()) {
@@ -84,14 +87,14 @@ class DecoratorManager extends DataProvider
 
             return $result;
         } catch (Exception $e) {
-            $this->logger->critical('Error');
+            $this->logger->critical('Error'); //текст ошибки лучше показывать
         }
 
-        return [];
+        return []; //лучше пустой массив не возвращать, может затруднить определение проблемы, лучше выбрасывать ошибку
     }
 
     public function getCacheKey(array $input)
     {
-        return json_encode($input);
+        return json_encode($input); //для кэша json_encode не самый лучший вариант, тут скорее md5 надо, ключ будет уникальным
     }
 }
