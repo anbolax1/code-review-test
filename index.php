@@ -4,30 +4,29 @@ namespace src\Integration;
 
 class DataProvider
 {
-    private $host;
-    private $user;
-    private $password;
+    private string $host;
+    private string $user;
+    private string $password;
 
-    //оформить PHPDoc согласно стандартам
+    //оформил PHPDoc согласно стандартам
     /**
-     * @param $host
-     * @param $user
-     * @param $password
+     * @param string $host
+     * @param string $user
+     * @param string $password
      */
-    public function __construct($host, $user, $password)
+    public function __construct(string $host, string $user, string $password) // добавил строгую типизацию
     {
         $this->host = $host;
         $this->user = $user;
         $this->password = $password;
     }
 
-    //возможно, стоит вынести этот метод в отдельный класс
     /**
      * @param array $request
      *
      * @return array
      */
-    public function get(array $request) // название функции не даёт понимания, что мы получаем
+    public function getResponse(array $request) // поменял название функции
     {
         // returns a response from external service
     }
@@ -42,59 +41,79 @@ use Psr\Cache\CacheItemPoolInterface;
 use Psr\Log\LoggerInterface;
 use src\Integration\DataProvider;
 
-class DecoratorManager extends DataProvider // наследование создаёт жесткую связь между классами, лучше использовать композицию
+class DecoratorManager // убрал наследование
 {
-    public $cache;
-    public $logger;
+    // сделал приватными свойства класса, чтобы извне нельзя было их изменить - инкапсуляция
+    private DataProvider $dataProvider;
+    private CacheItemPoolInterface $cache;
+    private LoggerInterface $logger;
 
     /**
-     * @param string $host
-     * @param string $user
-     * @param string $password
+     * @param DataProvider $dataProvider
      * @param CacheItemPoolInterface $cache
+     * @param LoggerInterface $logger
      */
-    public function __construct($host, $user, $password, CacheItemPoolInterface $cache)
+    // дата провайдер будем прокидывать в констуктор, это упростит тестирование и избавит от ошибок в случае, если $dataProvider поменяет функциональность
+    public function __construct(DataProvider $dataProvider, CacheItemPoolInterface $cache, LoggerInterface $logger) // перенес логгер в конструктор
     {
-        parent::__construct($host, $user, $password);
+        $this->dataProvider = $dataProvider;
         $this->cache = $cache;
-    }
-
-    public function setLogger(LoggerInterface $logger) //логгер нужно передавать в конструктор
-    {
         $this->logger = $logger;
     }
 
     /**
-     * {@inheritdoc}
+     * Получение и кеширование данных.
+     *
+     * @param array $input
      */
+    // разбил большой метод на насколько мелких согласное прицнипу разделения единственной ответственности
     public function getResponse(array $input)
     {
-        try {
-            // вот это лучше в отдельную функцию переместить
-            $cacheKey = $this->getCacheKey($input);
-            $cacheItem = $this->cache->getItem($cacheKey);
-            if ($cacheItem->isHit()) {
-                return $cacheItem->get();
-            }
+        $cachedResponse = $this->getCachedResponse($input);
 
-            $result = parent::get($input);
-
-            $cacheItem
-                ->set($result)
-                ->expiresAt(
-                    (new DateTime())->modify('+1 day')
-                );
-
-            return $result;
-        } catch (Exception $e) {
-            $this->logger->critical('Error'); //текст ошибки лучше показывать
+        if ($cachedResponse !== null) {
+            return $cachedResponse;
         }
 
-        return []; //лучше пустой массив не возвращать, может затруднить определение проблемы, лучше выбрасывать ошибку
+        return $this->fetchAndCacheData($input);
     }
 
-    public function getCacheKey(array $input)
+    private function getCachedResponse(array $input)
     {
-        return json_encode($input); //для кэша json_encode не самый лучший вариант, тут скорее md5 надо, ключ будет уникальным
+        $cacheKey = $this->getCacheKey($input);
+        $cachedItem = $this->cache->getItem($cacheKey);
+
+        if ($cachedItem->isHit()) {
+            return $cachedItem->get();
+        }
+
+        return null;
+    }
+
+    private function fetchAndCacheData(array $input)
+    {
+        try {
+            $response = $this->dataProvider->getResponse($input);
+            $this->cacheResponse($input, $response);
+            return $response;
+        } catch (Exception $e) {
+            throw new Exception('Error fetching data: ' . $e->getMessage());
+        }
+    }
+
+    private function cacheResponse($input, $response)
+    {
+        $cacheKey = $this->getCacheKey($input);
+        $cachedItem = $this->cache->getItem($cacheKey);
+        $cachedItem
+            ->set($response)
+            ->expiresAt(
+            (new DateTime())->modify('+1 day')
+        );
+    }
+
+    private function getCacheKey(array $input)
+    {
+        return md5(serialize($input));
     }
 }
